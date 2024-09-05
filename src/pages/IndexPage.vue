@@ -1,17 +1,32 @@
 <template>
   <q-page class="row q-pt-xl">
     <div class="full-width q-px-xl">
-      <div class="q-mb-xl">
-        <q-input v-model="tempData.name" label="姓名" />
-        <q-input v-model="tempData.age" label="年齡" />
-        <q-btn color="primary" class="q-mt-md">新增</q-btn>
+      <div :key="refreshId" class="q-mb-xl">
+        <q-input v-model="tempData.name" label="姓名" :rules="[val => !!val || 'Field is required']" />
+        <q-input v-model="tempData.age" label="年齡" :rules="[
+          val => !!val || 'Field is required',
+          val => /^[0-9]*$/.test(val) || 'Field must be number'
+        ]" />
+        <q-btn color="primary" class="q-mt-md" @click="onCreateSubmit">新增</q-btn>
       </div>
-
+      <div class="q-mb-xl">
+        <q-input v-model="search" clearable label="搜尋" />
+        <q-select
+          v-model="sort"
+          label="排序"
+          :options="sortOptions"
+          emit-value
+          map-options
+          use-input
+          input-debounce="0"
+          clearable
+        />
+      </div>
       <q-table
         flat
         bordered
         ref="tableRef"
-        :rows="blockData"
+        :rows="tableSource"
         :columns="(tableConfig as QTableProps['columns'])"
         row-key="id"
         hide-pagination
@@ -73,25 +88,53 @@
           </div>
         </template>
       </q-table>
+      <q-dialog v-model="isEdit">
+        <q-card style="min-width: 350px">
+          <q-card-section>
+            <div class="text-h6">Your address</div>
+          </q-card-section>
+
+          <q-card-section class="q-pt-none" v-if="editData">
+            <q-input v-model="editData.name" label="姓名" :rules="[val => !!val || 'Field is required']" />
+            <q-input v-model="editData.age" label="年齡" :rules="[
+              val => !!val || 'Field is required',
+              val => /^[0-9]*$/.test(val) || 'Field must be number'
+            ]" />
+          </q-card-section>
+          <q-card-actions align="right" class="text-primary">
+            <q-btn flat label="取消" @click="editData = null" />
+            <q-btn flat label="更新" @click="onUpdateSubmit" />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
     </div>
   </q-page>
 </template>
 
 <script setup lang="ts">
-import axios from 'axios';
+import type { AxiosResponse } from 'axios'
 import { QTableProps } from 'quasar';
-import { ref } from 'vue';
-interface btnType {
+import { computed, onMounted, ref } from 'vue';
+import { fetchTest, createTest, updateTest, deleteTest, TestModel } from './services';
+import { useAsyncEvent } from './composables';
+import { useQuasar } from 'quasar'
+
+interface HtnType {
   label: string;
   icon: string;
   status: string;
 }
-const blockData = ref([
-  {
-    name: 'test',
-    age: 25,
-  },
-]);
+
+const search = ref('');
+
+const sort = ref('');
+const sortOptions = [
+  { label: '無', value: '' },
+  { label: '姓名', value: 'name' },
+  { label: '年齡', value: 'age' },
+];
+
+const blockData = ref([] as TestModel[]);
 const tableConfig = ref([
   {
     label: '姓名',
@@ -119,13 +162,80 @@ const tableButtons = ref([
   },
 ]);
 
-const tempData = ref({
+const DEFAULT_TEMP_DATA = {
   name: '',
   age: '',
+};
+
+const tempData = ref(DEFAULT_TEMP_DATA);
+
+const tableSource = computed(() => {
+  return blockData.value
+    .filter((item) => {
+      return item.name.includes(search.value) || item.age.toString().includes(search.value);
+    })
+    .sort((a, b) => {
+      if (sort.value === 'name') {
+        return a.name.localeCompare(b.name);
+      }
+      if (sort.value === 'age') {
+        return a.age - b.age;
+      }
+      return 0;
+    });
 });
-function handleClickOption(btn, data) {
-  // ...
+
+const refreshId = ref(0);
+
+const onCreateSubmit = () => {
+  createTest(tempData.value).then(() => fetchTest()).then(onFetchTestSuccess)
+  tempData.value.name = '';
+  tempData.value.age = '';
+  refreshId.value += 1;
 }
+
+const onFetchTestSuccess = useAsyncEvent((res: AxiosResponse<TestModel[]>) => {
+  blockData.value = res.data;
+})
+
+onMounted(() => {
+  fetchTest().then(onFetchTestSuccess)
+})
+
+
+const editData = ref(null as TestModel | null);
+const isEdit = computed(() => !!editData.value);
+
+const onUpdateSubmit = () => {
+  updateTest(editData.value).then(() => fetchTest()).then(onFetchTestSuccess)
+  editData.value = null;
+}
+
+const $q = useQuasar()
+
+const onDeleteById = (id: string) => {
+  $q.dialog({
+    title: '提示',
+    message: '是否確定刪除該筆資料?',
+    cancel: true,
+    persistent: true
+  }).onOk(() => {
+    deleteTest(id).then(() => fetchTest()).then(onFetchTestSuccess)
+  })
+}
+
+const handleClickOption = (btn: HtnType, row: TestModel) => {
+  switch (btn.status) {
+    case 'edit':
+      editData.value = { ...row };
+      break;
+    case 'delete':
+      onDeleteById(row.id);
+      break;
+    default:
+      break;
+  }
+};
 </script>
 
 <style lang="scss" scoped>
